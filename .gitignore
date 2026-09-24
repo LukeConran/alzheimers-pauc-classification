@@ -1,0 +1,22 @@
+# data (never commit raw/processed data or splits with PHI/large files)
+experiments/data/raw/
+experiments/data/processed/
+experiments/data/splits/
+
+# generated outputs
+experiments/results/
+figures/*
+!figures/.gitkeep
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.ipynb_checkpoints/
+
+# job logs / scratch
+experiments/jobs/*.log
+experiments/jobs/*.out
+
+# os
+.DS_Store
