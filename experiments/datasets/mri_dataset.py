@@ -62,14 +62,9 @@ class MRIDataset(Dataset):
 
     def __getitem__(self, idx):
         item = self.data[idx]
-        image = self._load_normalized(item)
-        image_tensor = torch.from_numpy(image).float()
-
-        label_text = item["label"]
-        label = LABEL_MAP[label_text]
-
+        image = torch.from_numpy(self._load_image(item["id"]))[None]  # (1, D, H, W) #is this correct?
         if self.transform:
-            image_tensor = self.transform(image_tensor)
+            image = self.transform(image)
 
-        return image_tensor, label
+        return image, LABEL_MAP[item["label"]]
     
