@@ -44,7 +44,7 @@ def train(args):
     params = [{'params': parameters['base_parameters'], 'lr': args.lr},
                        {'params': parameters['new_parameters'], 'lr':args.lr*args.head_lr_mult}]
     optimizer = torch.optim.AdamW(params, weight_decay=args.weight_decay)
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99)           #NOTE hardcoded value
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99)           #NOTE hardcoded value, also should we change>
     criterion = torch.nn.CrossEntropyLoss()
 
     # Using a cache directory will help tremendously as we reuse data? 
@@ -103,11 +103,14 @@ def train(args):
     else:
         epoch_metrics = []
 
-    # TRAINING
+    # TRAINING EPOCHS
     n_train_batches = len(train_loader)
     for epoch in range(start_epoch, args.epochs):
+
+        # Train
         classifier.train()
-        total_loss = correct = total = 0
+        total_loss = train_correct = train_total = 0
+
         epoch_start = time.time()
 
         for i, group in enumerate(optimizer.param_groups):
@@ -118,6 +121,7 @@ def train(args):
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
 
+            # uses autocast since on an A100 GPU
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_amp):
                 logits = classifier(images)
                 loss = criterion(logits, labels)
@@ -127,28 +131,77 @@ def train(args):
             optimizer.step()
 
             total_loss += loss.item() * labels.size(0)
-            correct += (logits.argmax(dim=1) == labels).sum().item()
-            total += labels.size(0)
+            train_correct += (logits.argmax(dim=1) == labels).sum().item()
+            train_total += labels.size(0)
 
             if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == n_train_batches:
-                running_loss = total_loss / total
-                running_acc = correct / total
+                running_loss = total_loss / train_total
+                running_acc = train_correct / train_total
                 print(f"  [Epoch {epoch+1}/{args.epochs}] Batch {batch_idx+1}/{n_train_batches} — "
                       f"loss: {running_loss:.4f}  acc: {running_acc:.4f}", flush=True)
 
-        
+        train_avg_loss = total_loss / train_total
+        train_acc = train_correct / train_total
         scheduler.step()
 
         # Validation
+        classifier.eval()
+        val_loss = val_correct = val_total = 0
 
+        with torch.no_grad():
+            for images, labels in valid_loader:
+                images = images.to(device, non_blocking=True)
+                labels = labels.to(device, non_blocking=True)
+
+                # uses autocast since on an A100 GPU
+                with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=use_amp):
+                    logits = classifier(images)
+                    loss = criterion(logits, labels)
+
+                val_loss += loss.item() * labels.size(0)
+                val_correct += (logits.argmax(dim=1) == labels).sum().item()
+                val_total += labels.size(0)
+
+        val_avg_loss = val_loss / val_total
+        val_acc = val_correct / val_total
+        
         #Checkpointing if necessary
+        if (epoch + 1) % 10 == 0:
+            ckpt_path = os.path.join(args.output_dir, f"model_{args.model_name}_bs{args.batch_size}_epoch_{epoch+1}.pth")
+            torch.save({
+                'epoch': epoch + 1,
+                'model': classifier.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'scheduler': scheduler.state_dict(),
+                'best_val_acc': best_val_acc,
+            }, ckpt_path)
+            print(f"Saved checkpoint at epoch {epoch+1}.", flush=True)
+        
+        if val_acc > best_val_acc: # Currently, this saves the best model based on accuracy. We likely want to save based on AUPRC, AUROC, or pAUC
+            best_val_acc = val_acc
+            torch.save(classifier.state_dict(), os.path.join(args.output_dir, f"best_model_{args.model_name}_bs{args.batch_size}.pth"))
+            print(f"New best model saved at epoch {epoch+1} with val_acc: {val_acc:.4f}", flush=True)
+
+        epoch_time = time.time() - epoch_start
+        print(f"[Epoch {epoch+1}/{args.epochs}] Train Loss: {train_avg_loss:.4f}  Train Acc: {train_acc:.4f} | "
+              f"Val Loss: {val_avg_loss:.4f}  Val Acc: {val_acc:.4f} | "
+              f"Time: {epoch_time:.1f}s", flush=True)
 
         #Save epoch metrics
+        epoch_metrics.append({
+            'epoch': epoch + 1,
+            'train_loss': train_avg_loss,
+            'train_acc': train_acc,
+            'val_loss': val_avg_loss,
+            'val_acc': val_acc,
+        })
+        with open(metrics_path, 'w') as f:
+            json.dump(epoch_metrics, f, indent=2)
     
     #------------------------------#
     train_elapsed = time.time() - train_start_time
     print(f"Training finished at {datetime.datetime.now().isoformat(timespec='seconds')} "
-          f"(total time: {train_elapsed/3600:.2f}h, {train_elapsed:.1f}s)", flush=True)
+          f"(Total time: {train_elapsed/3600:.2f}h, {train_elapsed:.1f}s)", flush=True)
 
 
 if __name__ == "__main__":

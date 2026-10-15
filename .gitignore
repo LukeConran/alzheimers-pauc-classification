@@ -20,3 +20,6 @@ experiments/jobs/*.out
 
 # os
 .DS_Store
+
+# vs settings
+.vscode/

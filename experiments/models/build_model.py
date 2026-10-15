@@ -3,7 +3,7 @@
 # Chen et al., "Med3D: Transfer Learning for 3D Medical Image Analysis", arXiv:1904.00625 (2019)
 
 import torch
-import resnet
+from models import resnet
 
 def generate_model(model_name='resnet10', num_seg_classes=2, no_cuda=False, phase='train', pretrain_path=None, new_layer_names=['fc']):
 

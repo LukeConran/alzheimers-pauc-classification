@@ -1,6 +1,7 @@
 # Backbone architecture directly from Tencent's MedicalNet (Med3D):
 # https://github.com/Tencent/MedicalNet
 # Chen et al., "Med3D: Transfer Learning for 3D Medical Image Analysis", arXiv:1904.00625 (2019)
+# I did remove the three sample inputs that were unused in the initialization of the ResNet class though
 
 import torch
 import torch.nn as nn
@@ -118,9 +119,6 @@ class ResNet(nn.Module):
     def __init__(self,
                  block,
                  layers,
-                 sample_input_D,
-                 sample_input_H,
-                 sample_input_W,
                  num_seg_classes,
                  shortcut_type='B',
                  no_cuda = False):
@@ -146,31 +144,8 @@ class ResNet(nn.Module):
         self.layer4 = self._make_layer(
             block, 512, layers[3], shortcut_type, stride=1, dilation=4)
 
-        self.conv_seg = nn.Sequential(
-                                        nn.ConvTranspose3d(
-                                        512 * block.expansion,
-                                        32,
-                                        2,
-                                        stride=2
-                                        ),
-                                        nn.BatchNorm3d(32),
-                                        nn.ReLU(inplace=True),
-                                        nn.Conv3d(
-                                        32,
-                                        32,
-                                        kernel_size=3,
-                                        stride=(1, 1, 1),
-                                        padding=(1, 1, 1),
-                                        bias=False), 
-                                        nn.BatchNorm3d(32),
-                                        nn.ReLU(inplace=True),
-                                        nn.Conv3d(
-                                        32,
-                                        num_seg_classes,
-                                        kernel_size=1,
-                                        stride=(1, 1, 1),
-                                        bias=False) 
-                                        )
+        self.avgpool = nn.AdaptiveAvgPool3d(1)  # My change
+        self.fc = nn.Linear(512 * block.expansion, num_seg_classes) # My change
 
         for m in self.modules():
             if isinstance(m, nn.Conv3d):
@@ -214,7 +189,8 @@ class ResNet(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-        x = self.conv_seg(x)
+        x = self.avgpool(x).flatten(1)
+        x = self.fc(x)
 
         return x
 
